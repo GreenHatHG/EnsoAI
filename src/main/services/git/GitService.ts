@@ -1468,6 +1468,33 @@ export class GitService {
   }
 
   /**
+   * Find the submodule containing a file path.
+   * Returns the submodule path if found, null otherwise.
+   */
+  private async findSubmoduleForFile(filePath: string): Promise<string | null> {
+    try {
+      const submodules = await this.listSubmodules();
+      // Normalize path separators for comparison
+      const normalizedFilePath = filePath.replace(/\\/g, '/');
+
+      // Sort submodules by path length (descending) to match the longest path first
+      // This handles nested submodules correctly
+      const sortedSubmodules = [...submodules].sort((a, b) => b.path.length - a.path.length);
+
+      for (const submodule of sortedSubmodules) {
+        const subPath = submodule.path.replace(/\\/g, '/');
+        // Check if the file is within this submodule
+        if (normalizedFilePath.startsWith(subPath + '/') || normalizedFilePath === subPath) {
+          return subPath;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Get blame info for all lines of a file using `git blame --porcelain`.
    *
    * Security note: Path traversal is not a concern here because:
@@ -1478,8 +1505,22 @@ export class GitService {
   async blame(filePath: string): Promise<GitBlameLineInfo[]> {
     const BLAME_TIMEOUT_MS = 30000; // 30 second timeout for git blame
 
+    // Check if the file is in a submodule
+    const submodulePath = await this.findSubmoduleForFile(filePath);
+    let workdir = this.workdir;
+    let relativePath = filePath;
+
+    if (submodulePath) {
+      // File is in a submodule, use submodule's git directory
+      workdir = path.join(this.workdir, submodulePath);
+      // Calculate the relative path within the submodule
+      const normalizedSubPath = submodulePath.replace(/\\/g, '/');
+      const normalizedFilePath = filePath.replace(/\\/g, '/');
+      relativePath = normalizedFilePath.slice(normalizedSubPath.length + 1);
+    }
+
     return new Promise((resolve, reject) => {
-      const proc = spawnGit(this.workdir, ['blame', '--porcelain', '--', filePath]);
+      const proc = spawnGit(workdir, ['blame', '--porcelain', '--', relativePath]);
 
       let stdout = '';
       let stderr = '';
