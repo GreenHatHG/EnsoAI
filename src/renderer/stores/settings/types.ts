@@ -392,6 +392,8 @@ export interface SettingsState {
 
   // Hide Groups setting
   hideGroups: boolean;
+  hiddenOpenInApps: string[];
+  openInMenuFilterEnabled: boolean;
 
   // Logging
   loggingEnabled: boolean;
@@ -535,6 +537,8 @@ export interface SettingsState {
 
   // Setters - Other
   setHideGroups: (hide: boolean) => void;
+  toggleHiddenOpenInApp: (bundleId: string) => void;
+  setOpenInMenuFilterEnabled: (enabled: boolean) => void;
 
   // Setters - Logging
   setLoggingEnabled: (enabled: boolean) => void;
