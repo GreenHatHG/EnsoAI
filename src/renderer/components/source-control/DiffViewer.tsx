@@ -1201,8 +1201,8 @@ export function DiffViewer({
             key={`${rootPath}-${file.path}-${file.staged}-${isThemeReady}-${isEditing}`}
             original={diff.original}
             modified={isEditing && editedContent !== null ? editedContent : diff.modified}
-            originalModelPath={`inmemory://original/${rootPath}/${file.path}`}
-            modifiedModelPath={`inmemory://modified/${rootPath}/${file.path}`}
+            originalModelPath={`inmemory://original/${rootPath.replace(/\\/g, '/')}/${file.path.replace(/\\/g, '/')}`}
+            modifiedModelPath={`inmemory://modified/${rootPath.replace(/\\/g, '/')}/${file.path.replace(/\\/g, '/')}`}
             language={getLanguageFromPath(file.path)}
             theme={CUSTOM_THEME_NAME}
             onMount={handleEditorMount}
