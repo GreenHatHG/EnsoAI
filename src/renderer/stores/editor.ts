@@ -21,6 +21,13 @@ export interface PendingCursor {
   previewMode?: 'off' | 'split' | 'fullscreen';
 }
 
+// Navigation history entry: file path + cursor position (Monaco 1-indexed)
+export interface NavEntry {
+  path: string;
+  line: number;
+  column: number;
+}
+
 interface WorktreeEditorState {
   tabs: EditorTab[];
   activeTabPath: string | null;
@@ -32,6 +39,10 @@ interface EditorState {
   activeTabPath: string | null;
   pendingCursor: PendingCursor | null;
   currentCursorLine: number | null; // Current cursor line in active editor
+
+  // Navigation history (back/forward)
+  navBackStack: NavEntry[];
+  navForwardStack: NavEntry[];
 
   // Per-worktree state storage
   worktreeStates: Record<string, WorktreeEditorState>;
@@ -53,6 +64,12 @@ interface EditorState {
   reorderTabs: (fromIndex: number, toIndex: number) => void;
   setPendingCursor: (cursor: PendingCursor | null) => void;
   setCurrentCursorLine: (line: number | null) => void;
+  // Push current position into back stack and clear forward stack
+  pushNavHistory: (current: NavEntry) => void;
+  // Go back: push current to forward stack, return previous entry (or null if empty)
+  navBack: (current: NavEntry) => NavEntry | null;
+  // Go forward: push current to back stack, return next entry (or null if empty)
+  navForward: (current: NavEntry) => NavEntry | null;
   switchWorktree: (worktreePath: string | null) => void;
   clearAllWorktreeStates: () => void;
   clearWorktreeState: (worktreePath: string) => void;
@@ -65,6 +82,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeTabPath: null,
   pendingCursor: null,
   currentCursorLine: null,
+  navBackStack: [],
+  navForwardStack: [],
   worktreeStates: {},
   currentWorktreePath: null,
 
@@ -214,6 +233,73 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setCurrentCursorLine: (line) => set({ currentCursorLine: line }),
 
+  pushNavHistory: (current) =>
+    set((state) => {
+      const top = state.navBackStack[state.navBackStack.length - 1];
+      // Skip if same file and same line as the top entry (avoid duplicate noise)
+      if (
+        top &&
+        top.path === current.path &&
+        top.line === current.line &&
+        top.column === current.column
+      )
+        return {};
+      const newStack = [...state.navBackStack, current];
+      // Cap back stack at 100 entries
+      if (newStack.length > 100) newStack.shift();
+      return { navBackStack: newStack, navForwardStack: [] };
+    }),
+
+  navBack: (current) => {
+    const { navBackStack, navForwardStack } = get();
+    if (navBackStack.length === 0) return null;
+    const newBackStack = [...navBackStack];
+    // Skip entries at the same position as current to avoid no-op navigation
+    // (can occur when navForward pushes the target as a checkpoint)
+    while (newBackStack.length > 0) {
+      const top = newBackStack[newBackStack.length - 1];
+      if (top.path !== current.path || top.line !== current.line || top.column !== current.column)
+        break;
+      newBackStack.pop();
+    }
+    if (newBackStack.length === 0) return null;
+    const target = newBackStack.pop()!;
+    const newForwardStack = [...navForwardStack, current];
+    if (newForwardStack.length > 100) newForwardStack.shift();
+    set({ navBackStack: newBackStack, navForwardStack: newForwardStack });
+    return target;
+  },
+
+  navForward: (current) => {
+    const { navBackStack, navForwardStack } = get();
+    if (navForwardStack.length === 0) return null;
+    const newForwardStack = [...navForwardStack];
+    const target = newForwardStack.pop()!;
+    const newBackStack = [...navBackStack];
+    // Push current position (skip if duplicate of top)
+    const top = newBackStack[newBackStack.length - 1];
+    if (
+      !top ||
+      top.path !== current.path ||
+      top.line !== current.line ||
+      top.column !== current.column
+    ) {
+      newBackStack.push(current);
+    }
+    // Push target as a checkpoint: allows Alt+Left to return here after the user
+    // clicks away. Skip if target is the same position as current (would be no-op).
+    if (
+      target.path !== current.path ||
+      target.line !== current.line ||
+      target.column !== current.column
+    ) {
+      newBackStack.push(target);
+    }
+    while (newBackStack.length > 100) newBackStack.shift();
+    set({ navBackStack: newBackStack, navForwardStack: newForwardStack });
+    return target;
+  },
+
   switchWorktree: (worktreePath) => {
     const state = get();
     const currentPath = state.currentWorktreePath;
@@ -240,6 +326,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       activeTabPath: savedState?.activeTabPath ?? null,
       pendingCursor: null,
       currentCursorLine: null,
+      navBackStack: [],
+      navForwardStack: [],
     });
   },
 
@@ -251,6 +339,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       activeTabPath: null,
       pendingCursor: null,
       currentCursorLine: null,
+      navBackStack: [],
+      navForwardStack: [],
     });
   },
 

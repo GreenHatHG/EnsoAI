@@ -2,6 +2,7 @@ import type * as monaco from 'monaco-editor';
 import { createElement as h, type ReactElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+import { useEditorStore } from '@/stores/editor';
 import { useNavigationStore } from '@/stores/navigation';
 
 type Monaco = typeof monaco;
@@ -555,6 +556,16 @@ export function setupDefinitionNavigation(
 ): { dispose: () => void } {
   /** Navigate to a single resolved location. */
   const navigateTo = (loc: DefinitionLocation, currentPath: string) => {
+    // Record current position before any navigation so Alt+Left can return here
+    const currentPos = editor.getPosition();
+    if (currentPos) {
+      useEditorStore.getState().pushNavHistory({
+        path: currentPath,
+        line: currentPos.lineNumber,
+        column: currentPos.column,
+      });
+    }
+
     if (loc.path.replace(/^\/private/, '') === currentPath.replace(/^\/private/, '')) {
       const col = loc.column + 1; // Monaco is 1-based
       editor.setPosition({ lineNumber: loc.line, column: col });

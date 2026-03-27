@@ -30,7 +30,7 @@ import { useDebouncedSave } from '@/hooks/useDebouncedSave';
 import { useI18n } from '@/i18n';
 import { toMonacoFileUri } from '@/lib/monacoModelPath';
 import { useActiveSessionId } from '@/stores/agentSessions';
-import type { EditorTab, PendingCursor } from '@/stores/editor';
+import type { EditorTab, NavEntry, PendingCursor } from '@/stores/editor';
 import { useEditorStore } from '@/stores/editor';
 import { type TerminalKeybinding, useSettingsStore } from '@/stores/settings';
 import { useTerminalWriteStore } from '@/stores/terminalWrite';
@@ -279,6 +279,43 @@ export const EditorArea = forwardRef<EditorAreaRef, EditorAreaProps>(function Ed
   const definitionNavDisposableRef = useRef<{ dispose: () => void } | null>(null);
   // Flag to suppress onChange events triggered by programmatic setValue calls (not user input)
   const isProgrammaticUpdateRef = useRef(false);
+  // Debounce timer for recording edit positions into navigation history
+  const editNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable ref to onNavigateToFile prop to avoid stale closures inside addCommand handlers
+  const onNavigateToFileRef = useRef(onNavigateToFile);
+
+  // Keep onNavigateToFileRef in sync with the latest prop value
+  useEffect(() => {
+    onNavigateToFileRef.current = onNavigateToFile;
+  }, [onNavigateToFile]);
+
+  // Navigate to a NavEntry: same-file → direct cursor, open tab → switch + pending cursor, new file → load + pending cursor.
+  // Uses only stable refs so the callback reference never changes and is safe as a useEffect dependency.
+  const navigateToEntry = useCallback((target: NavEntry) => {
+    const store = useEditorStore.getState();
+    const colOffset = target.column - 1; // NavEntry is Monaco 1-indexed; pendingCursor uses 0-indexed
+    if (target.path === activeTabPathRef.current) {
+      const ed = editorRef.current;
+      if (ed) {
+        ed.setPosition({ lineNumber: target.line, column: target.column });
+        ed.revealLineInCenter(target.line);
+        ed.focus();
+      }
+    } else if (store.tabs.some((t) => t.path === target.path)) {
+      store.setActiveFile(target.path);
+      store.setPendingCursor({ path: target.path, line: target.line, column: colOffset });
+    } else if (onNavigateToFileRef.current) {
+      store.setPendingCursor({ path: target.path, line: target.line, column: colOffset });
+      onNavigateToFileRef.current(target.path);
+    }
+  }, []);
+
+  // Cleanup edit-position debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (editNavTimerRef.current) clearTimeout(editNavTimerRef.current);
+    };
+  }, []);
 
   // Set editor value without triggering the onChange handler (not treated as user input)
   const setEditorValueProgrammatically = useCallback(
@@ -736,6 +773,39 @@ export const EditorArea = forwardRef<EditorAreaRef, EditorAreaProps>(function Ed
     return () => disposable.dispose();
   }, [editorInstance, monacoInstance, editorReady, editorKeybindings.gotoSymbol]);
 
+  // Register Alt+Left/Right navigation keybindings via onKeyDown instead of addCommand.
+  // addCommand leaks into Monaco's shared command registry and cannot be disposed;
+  // onKeyDown is properly cleaned up when the editor instance changes.
+  useEffect(() => {
+    if (!editorInstance || !monacoInstance || !editorReady) return;
+
+    const disposable = editorInstance.onKeyDown((e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const isLeft = e.keyCode === monacoInstance.KeyCode.LeftArrow;
+      const isRight = e.keyCode === monacoInstance.KeyCode.RightArrow;
+      if (!isLeft && !isRight) return;
+
+      const currentPath = activeTabPathRef.current;
+      if (!currentPath) return;
+      const pos = editorRef.current?.getPosition();
+      const current: NavEntry = {
+        path: currentPath,
+        line: pos?.lineNumber ?? 1,
+        column: pos?.column ?? 1,
+      };
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const target = isLeft
+        ? useEditorStore.getState().navBack(current)
+        : useEditorStore.getState().navForward(current);
+      if (target) navigateToEntry(target);
+    });
+
+    return () => disposable.dispose();
+  }, [editorInstance, monacoInstance, editorReady, navigateToEntry]);
+
   // Selection comment widget and cursor tracking
   useEffect(() => {
     if (!editorReady) return;
@@ -1030,6 +1100,21 @@ export const EditorArea = forwardRef<EditorAreaRef, EditorAreaProps>(function Ed
             hasPendingAutoSaveRef.current = false;
           });
         }
+
+        // Debounced: record edit position into navigation history (500ms after last keystroke)
+        // Capture both path and cursor position now to avoid tab-switch race conditions:
+        // reading them inside the callback would reflect the new tab's state, not the edited file.
+        if (editNavTimerRef.current) clearTimeout(editNavTimerRef.current);
+        const capturedPath = activeTabPath;
+        const capturedPos = editorRef.current?.getPosition();
+        editNavTimerRef.current = setTimeout(() => {
+          if (!capturedPath || !capturedPos) return;
+          useEditorStore.getState().pushNavHistory({
+            path: capturedPath,
+            line: capturedPos.lineNumber,
+            column: capturedPos.column,
+          });
+        }, 500);
       }
     },
     [
