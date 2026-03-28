@@ -79,6 +79,11 @@ const HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR = '自定义参数必须是 JSON 对�
 const HTTP_CONFIG_EXTRA_BODY_HINT =
   'JSON 对象，会合并到请求 body，可覆盖 model/input/messages/stream';
 const HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER = '{"reasoning_effort":"medium"}';
+const HTTP_CONFIG_EDIT_ACTION_TEXT = 'Edit';
+const HTTP_CONFIG_REMOVE_ACTION_TEXT = 'Remove';
+const HTTP_CONFIG_ADD_ACTION_TEXT = 'Add Config';
+const HTTP_CONFIG_SAVE_ACTION_TEXT = 'Save Config';
+const HTTP_CONFIG_CANCEL_EDIT_ACTION_TEXT = 'Cancel Edit';
 
 // Reasoning effort options for Codex CLI
 const REASONING_EFFORTS: { value: string; label: string }[] = [
@@ -113,6 +118,13 @@ function parseHttpExtraBody(value: string): {
   }
 }
 
+function stringifyHttpExtraBody(extraBody: Record<string, unknown> | undefined): string {
+  if (!extraBody || Object.keys(extraBody).length === 0) {
+    return '';
+  }
+  return JSON.stringify(extraBody, null, 2);
+}
+
 // Get default model for provider
 function getDefaultModel(provider: AIProvider): string {
   if (provider === 'openai-http') {
@@ -127,6 +139,7 @@ export function AISettings() {
   const {
     aiHttpConfigs,
     addHttpAIConfig,
+    updateHttpAIConfig,
     removeHttpAIConfig,
     commitMessageGenerator,
     setCommitMessageGenerator,
@@ -149,6 +162,7 @@ export function AISettings() {
     null
   );
   const [httpDraftTesting, setHttpDraftTesting] = useState(false);
+  const [editingHttpConfigId, setEditingHttpConfigId] = useState<string | null>(null);
   const [testingSavedHttpConfigId, setTestingSavedHttpConfigId] = useState<string | null>(null);
   const [savedHttpConfigTestResults, setSavedHttpConfigTestResults] = useState<
     Record<string, HttpAIConfigTestResult | undefined>
@@ -207,6 +221,28 @@ export function AISettings() {
   const clearHttpDraftTestResult = () => {
     setHttpDraftTestResult(null);
     setHttpExtraBodyError(null);
+  };
+
+  const clearSavedHttpConfigTestResult = (id: string) => {
+    setSavedHttpConfigTestResults((prev) => {
+      if (!prev[id]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const resetHttpDraftForm = () => {
+    setHttpName('');
+    setHttpBaseUrl(DEFAULT_HTTP_AI_BASE_URL);
+    setHttpKey('');
+    setHttpModel('');
+    setHttpExtraBody('');
+    setHttpMode(DEFAULT_HTTP_AI_MODE);
+    setEditingHttpConfigId(null);
+    clearHttpDraftTestResult();
   };
 
   const buildHttpConfigTestRequest = (config: {
@@ -311,17 +347,27 @@ export function AISettings() {
 
   const handleRemoveHttpConfig = (id: string) => {
     removeHttpAIConfig(id);
-    setSavedHttpConfigTestResults((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    clearSavedHttpConfigTestResult(id);
     if (testingSavedHttpConfigId === id) {
       setTestingSavedHttpConfigId(null);
     }
+    if (editingHttpConfigId === id) {
+      resetHttpDraftForm();
+    }
   };
 
-  const handleAddHttpConfig = () => {
+  const handleEditHttpConfig = (config: HttpAIConfig) => {
+    setEditingHttpConfigId(config.id);
+    setHttpName(config.name);
+    setHttpBaseUrl(config.baseUrl);
+    setHttpKey(config.apiKey);
+    setHttpModel(config.model);
+    setHttpMode(config.mode || DEFAULT_HTTP_AI_MODE);
+    setHttpExtraBody(stringifyHttpExtraBody(config.extraBody));
+    clearHttpDraftTestResult();
+  };
+
+  const handleSaveHttpConfig = () => {
     const trimmedKey = httpKey.trim();
     const trimmedModel = httpModel.trim();
     if (!trimmedKey || !trimmedModel) {
@@ -334,26 +380,35 @@ export function AISettings() {
     }
     setHttpExtraBodyError(null);
 
+    const editingConfig = editingHttpConfigId
+      ? aiHttpConfigs.find((item) => item.id === editingHttpConfigId)
+      : undefined;
+    if (editingHttpConfigId && !editingConfig) {
+      resetHttpDraftForm();
+      return;
+    }
+    const fallbackName = editingConfig?.name || `HTTP-${aiHttpConfigs.length + 1}`;
     const payload: HttpAIConfig = {
-      id: crypto.randomUUID(),
-      name: httpName.trim() || `HTTP-${aiHttpConfigs.length + 1}`,
+      id: editingConfig?.id || crypto.randomUUID(),
+      name: httpName.trim() || fallbackName,
       baseUrl: (httpBaseUrl.trim() || DEFAULT_HTTP_AI_BASE_URL).replace(/\/+$/, ''),
       apiKey: trimmedKey,
       model: trimmedModel,
       mode: httpMode || DEFAULT_HTTP_AI_MODE,
       extraBody: parsedExtraBody.extraBody,
-      enabled: true,
+      enabled: editingConfig?.enabled ?? true,
     };
 
-    addHttpAIConfig(payload);
-    setHttpName('');
-    setHttpBaseUrl(DEFAULT_HTTP_AI_BASE_URL);
-    setHttpKey('');
-    setHttpModel('');
-    setHttpExtraBody('');
-    setHttpMode(DEFAULT_HTTP_AI_MODE);
-    setHttpDraftTestResult(null);
-    setHttpExtraBodyError(null);
+    if (editingConfig) {
+      updateHttpAIConfig(editingConfig.id, payload);
+      clearSavedHttpConfigTestResult(editingConfig.id);
+      if (testingSavedHttpConfigId === editingConfig.id) {
+        setTestingSavedHttpConfigId(null);
+      }
+    } else {
+      addHttpAIConfig(payload);
+    }
+    resetHttpDraftForm();
   };
 
   const getHttpConfigById = (id?: string | null): HttpAIConfig | undefined =>
@@ -453,9 +508,14 @@ export function AISettings() {
             >
               {httpDraftTesting ? 'Testing...' : 'Test Config'}
             </Button>
-            <Button type="button" onClick={handleAddHttpConfig} disabled={!httpKey || !httpModel}>
-              Add Config
+            <Button type="button" onClick={handleSaveHttpConfig} disabled={!httpKey || !httpModel}>
+              {editingHttpConfigId ? HTTP_CONFIG_SAVE_ACTION_TEXT : HTTP_CONFIG_ADD_ACTION_TEXT}
             </Button>
+            {editingHttpConfigId && (
+              <Button type="button" variant="ghost" onClick={resetHttpDraftForm}>
+                {HTTP_CONFIG_CANCEL_EDIT_ACTION_TEXT}
+              </Button>
+            )}
           </div>
 
           {httpExtraBodyError && <p className="text-xs text-red-500">失败: {httpExtraBodyError}</p>}
@@ -486,6 +546,14 @@ export function AISettings() {
                       <div className="ml-2 flex items-center gap-2">
                         <button
                           type="button"
+                          onClick={() => handleEditHttpConfig(item)}
+                          disabled={itemTesting}
+                          className="text-muted-foreground underline hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {HTTP_CONFIG_EDIT_ACTION_TEXT}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => void handleTestSavedHttpConfig(item)}
                           disabled={itemTesting}
                           className="text-muted-foreground underline hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
@@ -497,7 +565,7 @@ export function AISettings() {
                           onClick={() => handleRemoveHttpConfig(item.id)}
                           className="text-muted-foreground underline hover:text-foreground"
                         >
-                          Remove
+                          {HTTP_CONFIG_REMOVE_ACTION_TEXT}
                         </button>
                       </div>
                     </div>
