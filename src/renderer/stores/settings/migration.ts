@@ -200,6 +200,9 @@ export function migrateSettings(
       ...currentState.commitMessageGenerator,
       ...persisted.commitMessageGenerator,
     },
+    aiHttpConfigs: Array.isArray(persisted.aiHttpConfigs)
+      ? persisted.aiHttpConfigs
+      : currentState.aiHttpConfigs,
     codeReview: {
       ...currentState.codeReview,
       ...persisted.codeReview,

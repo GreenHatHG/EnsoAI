@@ -109,6 +109,7 @@ export function TaskDialog({ open, onOpenChange, task, defaultStatus, repoPath }
         timeout: todoPolish.timeout,
         provider: todoPolish.provider,
         model: todoPolish.model,
+        httpConfigId: todoPolish.httpConfigId,
         reasoningEffort: todoPolish.reasoningEffort,
         bare: todoPolish.bare,
         claudeEffort: todoPolish.claudeEffort,

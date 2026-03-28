@@ -32,6 +32,7 @@ import {
   getDefaultLocale,
   getDefaultShellConfig,
 } from './defaults';
+import { clearRemovedHttpConfigReferences } from './httpConfigRefs';
 import { cleanupLegacyFields, migrateSettings } from './migration';
 import { electronStorage } from './storage';
 import type {
@@ -143,6 +144,7 @@ function getInitialState() {
     claudeCodeIntegration: defaultClaudeCodeIntegrationSettings,
 
     // AI Features
+    aiHttpConfigs: [],
     commitMessageGenerator: defaultCommitMessageGeneratorSettings,
     codeReview: defaultCodeReviewSettings,
     branchNameGenerator: defaultBranchNameGeneratorSettings,
@@ -450,6 +452,34 @@ export const useSettingsStore = create<SettingsState>()(
         })),
 
       // AI Feature Setters
+      addHttpAIConfig: (config) =>
+        set((state) => ({
+          aiHttpConfigs: [...state.aiHttpConfigs, config],
+        })),
+
+      updateHttpAIConfig: (id, updates) =>
+        set((state) => ({
+          aiHttpConfigs: state.aiHttpConfigs.map((item) =>
+            item.id === id ? { ...item, ...updates } : item
+          ),
+        })),
+
+      removeHttpAIConfig: (id) =>
+        set((state) => {
+          const cleaned = clearRemovedHttpConfigReferences(state, id);
+          return {
+            aiHttpConfigs: state.aiHttpConfigs.filter((item) => item.id !== id),
+            ...cleaned,
+          };
+        }),
+
+      setHttpAIConfigEnabled: (id, enabled) =>
+        set((state) => ({
+          aiHttpConfigs: state.aiHttpConfigs.map((item) =>
+            item.id === id ? { ...item, enabled } : item
+          ),
+        })),
+
       setCommitMessageGenerator: (settings) =>
         set((state) => ({
           commitMessageGenerator: { ...state.commitMessageGenerator, ...settings },

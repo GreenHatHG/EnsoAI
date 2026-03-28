@@ -1,4 +1,35 @@
-export type AIProvider = 'claude-code' | 'codex-cli' | 'cursor-cli' | 'gemini-cli';
+export type AIProvider = 'claude-code' | 'codex-cli' | 'cursor-cli' | 'gemini-cli' | 'openai-http';
+
+export type HttpAIRequestMode = 'responses' | 'chat_completions';
+
+export const DEFAULT_HTTP_AI_BASE_URL = 'https://api.openai.com';
+export const DEFAULT_HTTP_AI_MODE: HttpAIRequestMode = 'responses';
+
+export interface HttpAIConfig {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  mode: HttpAIRequestMode;
+  extraBody?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export interface HttpAIConfigTestRequest {
+  name?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  mode?: HttpAIRequestMode;
+  extraBody?: Record<string, unknown>;
+}
+
+export interface HttpAIConfigTestResult {
+  success: boolean;
+  latency?: number;
+  error?: string;
+}
 
 export type ClaudeModelId = 'haiku' | 'sonnet' | 'opus';
 export type CodexModelId = 'gpt-5.2' | 'gpt-5.2-codex';
@@ -25,6 +56,7 @@ export interface CommonAISettings extends AIOptimizationOptions {
   provider: AIProvider;
   model: string;
   reasoningEffort?: ReasoningEffort;
+  httpConfigId?: string;
 }
 
 // Common AI CLI options for main process services
@@ -32,4 +64,5 @@ export interface CommonAICLIOptions extends AIOptimizationOptions {
   provider: AIProvider;
   model: ModelId;
   reasoningEffort?: ReasoningEffort;
+  httpConfigId?: string;
 }

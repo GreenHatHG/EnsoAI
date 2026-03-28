@@ -339,6 +339,7 @@ export function CreateWorktreeDialog({
         prompt,
         provider: branchNameGenerator.provider,
         model: branchNameGenerator.model,
+        httpConfigId: branchNameGenerator.httpConfigId,
         reasoningEffort: branchNameGenerator.reasoningEffort,
         bare: branchNameGenerator.bare,
         claudeEffort: branchNameGenerator.claudeEffort,

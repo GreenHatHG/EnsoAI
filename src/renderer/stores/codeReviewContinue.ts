@@ -131,6 +131,7 @@ export async function startCodeReview(
   settings: {
     provider: AIProvider;
     model: string;
+    httpConfigId?: string;
     reasoningEffort?: string;
     bare?: boolean;
     claudeEffort?: string;
@@ -200,6 +201,7 @@ export async function startCodeReview(
     const result = await window.electronAPI.git.startCodeReview(repoPath, {
       provider: settings.provider,
       model: settings.model,
+      httpConfigId: settings.httpConfigId,
       reasoningEffort: settings.reasoningEffort,
       bare: settings.bare,
       claudeEffort: settings.claudeEffort,

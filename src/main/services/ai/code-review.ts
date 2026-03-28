@@ -1,7 +1,7 @@
-import type { ChildProcess } from 'node:child_process';
-import type { AIProvider, ModelId } from '@shared/types';
 import type { CommonAICLIOptions } from '@shared/types/ai';
 import { spawnGit } from '../git/runtime';
+import { streamHttpAIText } from './http-client';
+import { resolveHttpAIConfig } from './http-config';
 import { spawnCLI, stripAnsi } from './providers';
 
 export interface CodeReviewOptions extends CommonAICLIOptions {
@@ -16,11 +16,11 @@ export interface CodeReviewOptions extends CommonAICLIOptions {
 }
 
 interface ActiveReview {
-  proc: ChildProcess;
   kill: () => void;
 }
 
 const activeReviews = new Map<string, ActiveReview>();
+const HTTP_REVIEW_TIMEOUT_MS = 5 * 60 * 1000;
 
 async function runGit(args: string[], cwd: string): Promise<string> {
   return await new Promise((resolve) => {
@@ -330,6 +330,48 @@ export async function startCodeReview(options: CodeReviewOptions): Promise<void>
 
   const prompt = buildPrompt(gitDiff, gitLog, language, customPrompt);
 
+  if (provider === 'openai-http') {
+    const resolvedConfig = resolveHttpAIConfig(options.httpConfigId);
+    if (!resolvedConfig.config) {
+      onError(resolvedConfig.error ?? 'Missing HTTP model config');
+      return;
+    }
+
+    const controller = new AbortController();
+    activeReviews.set(reviewId, {
+      kill: () => controller.abort(),
+    });
+
+    streamHttpAIText({
+      config: resolvedConfig.config,
+      prompt,
+      timeoutMs: HTTP_REVIEW_TIMEOUT_MS,
+      signal: controller.signal,
+      onChunk,
+    })
+      .then(() => {
+        const review = activeReviews.get(reviewId);
+        if (!review) {
+          return;
+        }
+        activeReviews.delete(reviewId);
+        onComplete();
+      })
+      .catch((error) => {
+        const review = activeReviews.get(reviewId);
+        if (!review) {
+          return;
+        }
+        activeReviews.delete(reviewId);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('aborted')) {
+          return;
+        }
+        onError(errorMessage);
+      });
+    return;
+  }
+
   // Use stream-json for Claude, Cursor, and Gemini; json for Codex (doesn't support streaming well)
   const outputFormat = provider === 'codex-cli' ? 'json' : 'stream-json';
 
@@ -348,7 +390,7 @@ export async function startCodeReview(options: CodeReviewOptions): Promise<void>
     preserveSession: !!options.sessionId, // Preserve session if sessionId is provided
   });
 
-  activeReviews.set(reviewId, { proc, kill });
+  activeReviews.set(reviewId, { kill });
 
   const claudeParser = new ClaudeStreamParser();
   const geminiParser = new GeminiStreamParser();

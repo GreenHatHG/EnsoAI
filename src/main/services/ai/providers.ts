@@ -2,13 +2,10 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn, spawnSync } from 'node:child_process';
 import type {
   AIProvider,
-  ClaudeEffort,
   ClaudeModelId,
   CodexModelId,
   CursorModelId,
   GeminiModelId,
-  ModelId,
-  ReasoningEffort,
 } from '@shared/types';
 import type { CommonAICLIOptions } from '@shared/types/ai';
 import { getEnvForCommand, getShellForCommand } from '../../utils/shell';
@@ -229,6 +226,8 @@ export function spawnCLI(options: CLISpawnOptions): CLISpawnResult {
       cliCommand = 'agent';
       cliArgs = buildCursorArgs(options);
       break;
+    case 'openai-http':
+      throw new Error('openai-http provider must use HTTP client, not spawnCLI');
     default:
       cliCommand = 'claude';
       cliArgs = buildClaudeArgs(options);
@@ -431,6 +430,8 @@ export function parseCLIOutput(provider: AIProvider, stdout: string): ParsedCLIR
       return parseCursorOutput(stdout);
     case 'gemini-cli':
       return parseGeminiJsonOutput(stdout);
+    case 'openai-http':
+      return { success: false, error: 'openai-http provider must use HTTP parser' };
     default:
       return parseClaudeJsonOutput(stdout);
   }

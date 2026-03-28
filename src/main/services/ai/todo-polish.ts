@@ -1,5 +1,6 @@
-import type { AIProvider, ModelId } from '@shared/types';
 import type { CommonAICLIOptions } from '@shared/types/ai';
+import { requestHttpAIText } from './http-client';
+import { resolveHttpAIConfig } from './http-config';
 import { parseCLIOutput, spawnCLI, stripCodeFence } from './providers';
 
 export interface TodoPolishOptions extends CommonAICLIOptions {
@@ -68,6 +69,31 @@ Raw requirement:
 
   const promptTemplate = customPrompt || defaultPrompt;
   const prompt = promptTemplate.replace(/\{text\}/g, () => text);
+
+  if (provider === 'openai-http') {
+    const resolvedConfig = resolveHttpAIConfig(options.httpConfigId);
+    if (!resolvedConfig.config) {
+      return { success: false, error: resolvedConfig.error ?? 'Missing HTTP model config' };
+    }
+
+    try {
+      const responseText = await requestHttpAIText({
+        config: resolvedConfig.config,
+        prompt,
+        timeoutMs: timeout * 1000,
+      });
+      const parsed = parsePolishOutput(responseText);
+      if (parsed) {
+        return { success: true, title: parsed.title, description: parsed.description };
+      }
+      return { success: false, error: 'Failed to parse AI output as JSON' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 
   return new Promise((resolve) => {
     const timeoutMs = timeout * 1000;

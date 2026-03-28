@@ -1,17 +1,16 @@
 import type { Locale } from '@shared/i18n';
 import type {
-  AIProvider,
   BuiltinAgentId,
   ConnectionProfile,
   CustomAgent,
   GitHostMapping,
+  HttpAIConfig,
   McpServer,
   PromptPreset,
   ProxySettings,
-  ReasoningEffort,
   ShellConfig,
 } from '@shared/types';
-import type { ClaudeEffort, CommonAISettings } from '@shared/types/ai';
+import type { CommonAISettings } from '@shared/types/ai';
 
 // Theme types
 export type Theme = 'light' | 'dark' | 'system' | 'sync-terminal';
@@ -335,6 +334,7 @@ export interface SettingsState {
   claudeCodeIntegration: ClaudeCodeIntegrationSettings;
 
   // AI Features
+  aiHttpConfigs: HttpAIConfig[];
   commitMessageGenerator: CommitMessageGeneratorSettings;
   codeReview: CodeReviewSettings;
   branchNameGenerator: BranchNameGeneratorSettings;
@@ -466,6 +466,10 @@ export interface SettingsState {
   setClaudeProviderOrder: (providers: import('@shared/types').ClaudeProvider[]) => void;
 
   // Setters - AI Features
+  addHttpAIConfig: (config: HttpAIConfig) => void;
+  updateHttpAIConfig: (id: string, updates: Partial<HttpAIConfig>) => void;
+  removeHttpAIConfig: (id: string) => void;
+  setHttpAIConfigEnabled: (id: string, enabled: boolean) => void;
   setCommitMessageGenerator: (settings: Partial<CommitMessageGeneratorSettings>) => void;
   setCodeReview: (settings: Partial<CodeReviewSettings>) => void;
   setBranchNameGenerator: (settings: Partial<BranchNameGeneratorSettings>) => void;
@@ -557,7 +561,13 @@ export interface SettingsState {
 }
 
 // Re-export types from @shared/types
-export type { AIProvider, ClaudeEffort, CommonAISettings, ReasoningEffort } from '@shared/types';
+export type {
+  AIProvider,
+  ClaudeEffort,
+  CommonAISettings,
+  HttpAIConfig,
+  ReasoningEffort,
+} from '@shared/types';
 
 // Builtin agent IDs
 export const BUILTIN_AGENT_IDS: BuiltinAgentId[] = [

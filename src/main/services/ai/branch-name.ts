@@ -1,5 +1,6 @@
-import type { AIProvider, ModelId } from '@shared/types';
 import type { CommonAICLIOptions } from '@shared/types/ai';
+import { requestHttpAIText } from './http-client';
+import { resolveHttpAIConfig } from './http-config';
 import { parseCLIOutput, spawnCLI } from './providers';
 
 export interface BranchNameOptions extends CommonAICLIOptions {
@@ -25,6 +26,26 @@ export async function generateBranchName(options: BranchNameOptions): Promise<Br
     claudeEffort,
     timeout = 120,
   } = options;
+
+  if (provider === 'openai-http') {
+    const resolvedConfig = resolveHttpAIConfig(options.httpConfigId);
+    if (!resolvedConfig.config) {
+      return { success: false, error: resolvedConfig.error ?? 'Missing HTTP model config' };
+    }
+    try {
+      const text = await requestHttpAIText({
+        config: resolvedConfig.config,
+        prompt,
+        timeoutMs: timeout * 1000,
+      });
+      return { success: true, branchName: text.trim() };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 
   return new Promise((resolve) => {
     const timeoutMs = timeout * 1000;

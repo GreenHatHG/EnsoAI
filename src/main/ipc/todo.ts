@@ -86,6 +86,7 @@ export function registerTodoHandlers(): void {
         timeout: number;
         provider: string;
         model: string;
+        httpConfigId?: string;
         reasoningEffort?: string;
         bare?: boolean;
         claudeEffort?: string;
@@ -97,6 +98,7 @@ export function registerTodoHandlers(): void {
         timeout: options.timeout,
         provider: (options.provider ?? 'claude-code') as AIProvider,
         model: options.model as ModelId,
+        httpConfigId: options.httpConfigId,
         reasoningEffort: options.reasoningEffort as ReasoningEffort | undefined,
         bare: options.bare,
         claudeEffort: options.claudeEffort as ClaudeEffort | undefined,

@@ -50,6 +50,7 @@ export function CommitBox({
         timeout: commitMessageGenerator.timeout,
         provider: commitMessageGenerator.provider,
         model: commitMessageGenerator.model,
+        httpConfigId: commitMessageGenerator.httpConfigId,
         reasoningEffort: commitMessageGenerator.reasoningEffort,
         bare: commitMessageGenerator.bare,
         claudeEffort: commitMessageGenerator.claudeEffort,

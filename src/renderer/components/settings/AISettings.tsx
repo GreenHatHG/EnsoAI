@@ -1,4 +1,13 @@
+import {
+  DEFAULT_HTTP_AI_BASE_URL,
+  DEFAULT_HTTP_AI_MODE,
+  type HttpAIConfig,
+  type HttpAIConfigTestRequest,
+  type HttpAIConfigTestResult,
+  type HttpAIRequestMode,
+} from '@shared/types';
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -29,6 +38,7 @@ const PROVIDERS: { value: AIProvider; label: string }[] = [
   { value: 'codex-cli', label: 'Codex CLI' },
   { value: 'cursor-cli', label: 'Cursor CLI' },
   { value: 'gemini-cli', label: 'Gemini CLI' },
+  { value: 'openai-http', label: 'OpenAI HTTP' },
 ];
 
 // Model options per provider
@@ -53,7 +63,22 @@ const MODELS_BY_PROVIDER: Record<AIProvider, { value: string; label: string }[]>
     { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
     { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
   ],
+  'openai-http': [],
 };
+
+const HTTP_MODE_OPTIONS: { value: HttpAIRequestMode; label: string }[] = [
+  { value: 'responses', label: 'responses' },
+  { value: 'chat_completions', label: 'chat_completions' },
+];
+
+const HTTP_CONFIG_TEST_UNKNOWN_ERROR = 'Unknown error';
+const HTTP_CONFIG_TEST_SUCCESS_TEXT = '可用';
+const HTTP_CONFIG_REQUIRED_KEY_ERROR = 'HTTP model config key is required';
+const HTTP_CONFIG_REQUIRED_MODEL_ERROR = 'HTTP model config model is required';
+const HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR = '自定义参数必须是 JSON 对象';
+const HTTP_CONFIG_EXTRA_BODY_HINT =
+  'JSON 对象，会合并到请求 body，可覆盖 model/input/messages/stream';
+const HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER = '{"reasoning_effort":"medium"}';
 
 // Reasoning effort options for Codex CLI
 const REASONING_EFFORTS: { value: string; label: string }[] = [
@@ -65,8 +90,34 @@ const REASONING_EFFORTS: { value: string; label: string }[] = [
   { value: 'xhigh', label: 'xHigh' },
 ];
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseHttpExtraBody(value: string): {
+  extraBody?: Record<string, unknown>;
+  error?: string;
+} {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!isRecordObject(parsed)) {
+      return { error: HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR };
+    }
+    return { extraBody: parsed };
+  } catch {
+    return { error: HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR };
+  }
+}
+
 // Get default model for provider
 function getDefaultModel(provider: AIProvider): string {
+  if (provider === 'openai-http') {
+    return '';
+  }
   const models = MODELS_BY_PROVIDER[provider];
   return models[0]?.value ?? 'haiku';
 }
@@ -74,6 +125,9 @@ function getDefaultModel(provider: AIProvider): string {
 export function AISettings() {
   const { t, locale } = useI18n();
   const {
+    aiHttpConfigs,
+    addHttpAIConfig,
+    removeHttpAIConfig,
     commitMessageGenerator,
     setCommitMessageGenerator,
     codeReview,
@@ -83,6 +137,22 @@ export function AISettings() {
     todoPolish,
     setTodoPolish,
   } = useSettingsStore();
+
+  const [httpName, setHttpName] = useState('');
+  const [httpBaseUrl, setHttpBaseUrl] = useState(DEFAULT_HTTP_AI_BASE_URL);
+  const [httpKey, setHttpKey] = useState('');
+  const [httpModel, setHttpModel] = useState('');
+  const [httpExtraBody, setHttpExtraBody] = useState('');
+  const [httpExtraBodyError, setHttpExtraBodyError] = useState<string | null>(null);
+  const [httpMode, setHttpMode] = useState<HttpAIRequestMode>(DEFAULT_HTTP_AI_MODE);
+  const [httpDraftTestResult, setHttpDraftTestResult] = useState<HttpAIConfigTestResult | null>(
+    null
+  );
+  const [httpDraftTesting, setHttpDraftTesting] = useState(false);
+  const [testingSavedHttpConfigId, setTestingSavedHttpConfigId] = useState<string | null>(null);
+  const [savedHttpConfigTestResults, setSavedHttpConfigTestResults] = useState<
+    Record<string, HttpAIConfigTestResult | undefined>
+  >({});
 
   // Validation state for code review prompt
   const [promptValidation, setPromptValidation] = useState<{
@@ -134,6 +204,161 @@ export function AISettings() {
     });
   };
 
+  const clearHttpDraftTestResult = () => {
+    setHttpDraftTestResult(null);
+    setHttpExtraBodyError(null);
+  };
+
+  const buildHttpConfigTestRequest = (config: {
+    name?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+    mode?: HttpAIRequestMode;
+    extraBody?: Record<string, unknown>;
+  }): HttpAIConfigTestRequest => ({
+    name: config.name,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    model: config.model,
+    mode: config.mode,
+    extraBody: config.extraBody,
+  });
+
+  const formatHttpConfigTestResult = (result: HttpAIConfigTestResult): string => {
+    if (result.success) {
+      return result.latency !== undefined
+        ? `${HTTP_CONFIG_TEST_SUCCESS_TEXT} (${result.latency}ms)`
+        : HTTP_CONFIG_TEST_SUCCESS_TEXT;
+    }
+    return `失败: ${result.error ?? HTTP_CONFIG_TEST_UNKNOWN_ERROR}`;
+  };
+
+  const handleTestDraftHttpConfig = async () => {
+    if (!httpKey.trim()) {
+      setHttpDraftTestResult({
+        success: false,
+        error: HTTP_CONFIG_REQUIRED_KEY_ERROR,
+      });
+      return;
+    }
+    if (!httpModel.trim()) {
+      setHttpDraftTestResult({
+        success: false,
+        error: HTTP_CONFIG_REQUIRED_MODEL_ERROR,
+      });
+      return;
+    }
+    const parsedExtraBody = parseHttpExtraBody(httpExtraBody);
+    if (parsedExtraBody.error) {
+      setHttpExtraBodyError(parsedExtraBody.error);
+      return;
+    }
+    setHttpExtraBodyError(null);
+
+    setHttpDraftTesting(true);
+    try {
+      const result = await window.electronAPI.app.testHttpAIConfig(
+        buildHttpConfigTestRequest({
+          name: httpName,
+          baseUrl: httpBaseUrl,
+          apiKey: httpKey,
+          model: httpModel,
+          mode: httpMode,
+          extraBody: parsedExtraBody.extraBody,
+        })
+      );
+      setHttpDraftTestResult(result);
+    } catch (error) {
+      setHttpDraftTestResult({
+        success: false,
+        error: error instanceof Error ? error.message : HTTP_CONFIG_TEST_UNKNOWN_ERROR,
+      });
+    } finally {
+      setHttpDraftTesting(false);
+    }
+  };
+
+  const handleTestSavedHttpConfig = async (config: HttpAIConfig) => {
+    setTestingSavedHttpConfigId(config.id);
+    try {
+      const result = await window.electronAPI.app.testHttpAIConfig(
+        buildHttpConfigTestRequest({
+          name: config.name,
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          model: config.model,
+          mode: config.mode,
+          extraBody: config.extraBody,
+        })
+      );
+      setSavedHttpConfigTestResults((prev) => ({
+        ...prev,
+        [config.id]: result,
+      }));
+    } catch (error) {
+      setSavedHttpConfigTestResults((prev) => ({
+        ...prev,
+        [config.id]: {
+          success: false,
+          error: error instanceof Error ? error.message : HTTP_CONFIG_TEST_UNKNOWN_ERROR,
+        },
+      }));
+    } finally {
+      setTestingSavedHttpConfigId(null);
+    }
+  };
+
+  const handleRemoveHttpConfig = (id: string) => {
+    removeHttpAIConfig(id);
+    setSavedHttpConfigTestResults((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (testingSavedHttpConfigId === id) {
+      setTestingSavedHttpConfigId(null);
+    }
+  };
+
+  const handleAddHttpConfig = () => {
+    const trimmedKey = httpKey.trim();
+    const trimmedModel = httpModel.trim();
+    if (!trimmedKey || !trimmedModel) {
+      return;
+    }
+    const parsedExtraBody = parseHttpExtraBody(httpExtraBody);
+    if (parsedExtraBody.error) {
+      setHttpExtraBodyError(parsedExtraBody.error);
+      return;
+    }
+    setHttpExtraBodyError(null);
+
+    const payload: HttpAIConfig = {
+      id: crypto.randomUUID(),
+      name: httpName.trim() || `HTTP-${aiHttpConfigs.length + 1}`,
+      baseUrl: (httpBaseUrl.trim() || DEFAULT_HTTP_AI_BASE_URL).replace(/\/+$/, ''),
+      apiKey: trimmedKey,
+      model: trimmedModel,
+      mode: httpMode || DEFAULT_HTTP_AI_MODE,
+      extraBody: parsedExtraBody.extraBody,
+      enabled: true,
+    };
+
+    addHttpAIConfig(payload);
+    setHttpName('');
+    setHttpBaseUrl(DEFAULT_HTTP_AI_BASE_URL);
+    setHttpKey('');
+    setHttpModel('');
+    setHttpExtraBody('');
+    setHttpMode(DEFAULT_HTTP_AI_MODE);
+    setHttpDraftTestResult(null);
+    setHttpExtraBodyError(null);
+  };
+
+  const getHttpConfigById = (id?: string | null): HttpAIConfig | undefined =>
+    aiHttpConfigs.find((item) => item.id === id);
+
   return (
     <div className="space-y-6">
       <div>
@@ -141,6 +366,156 @@ export function AISettings() {
         <p className="text-sm text-muted-foreground">
           {t('Configure AI-powered features for code generation and review')}
         </p>
+      </div>
+
+      <div className="border-t pt-6">
+        <div>
+          <h4 className="text-base font-medium">HTTP Model Configs</h4>
+          <p className="text-sm text-muted-foreground">
+            key 和 model 必填，mode 默认 responses，base_url 默认官方地址
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <Input
+              value={httpName}
+              onChange={(e) => {
+                setHttpName(e.target.value);
+                clearHttpDraftTestResult();
+              }}
+              placeholder="Config name (optional)"
+            />
+            <Input
+              value={httpBaseUrl}
+              onChange={(e) => {
+                setHttpBaseUrl(e.target.value);
+                clearHttpDraftTestResult();
+              }}
+              placeholder={DEFAULT_HTTP_AI_BASE_URL}
+            />
+            <Input
+              type="password"
+              value={httpKey}
+              onChange={(e) => {
+                setHttpKey(e.target.value);
+                clearHttpDraftTestResult();
+              }}
+              placeholder="API key (required)"
+            />
+            <Input
+              value={httpModel}
+              onChange={(e) => {
+                setHttpModel(e.target.value);
+                clearHttpDraftTestResult();
+              }}
+              placeholder="Model (required)"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <textarea
+              value={httpExtraBody}
+              onChange={(e) => {
+                setHttpExtraBody(e.target.value);
+                clearHttpDraftTestResult();
+              }}
+              className="h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              placeholder={HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER}
+            />
+            <p className="text-xs text-muted-foreground">{HTTP_CONFIG_EXTRA_BODY_HINT}</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Select
+              value={httpMode}
+              onValueChange={(v) => {
+                setHttpMode(v as HttpAIRequestMode);
+                clearHttpDraftTestResult();
+              }}
+            >
+              <SelectTrigger className="w-52">
+                <SelectValue>{httpMode}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {HTTP_MODE_OPTIONS.map((mode) => (
+                  <SelectItem key={mode.value} value={mode.value}>
+                    {mode.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleTestDraftHttpConfig()}
+              disabled={!httpKey || !httpModel || httpDraftTesting}
+            >
+              {httpDraftTesting ? 'Testing...' : 'Test Config'}
+            </Button>
+            <Button type="button" onClick={handleAddHttpConfig} disabled={!httpKey || !httpModel}>
+              Add Config
+            </Button>
+          </div>
+
+          {httpExtraBodyError && <p className="text-xs text-red-500">失败: {httpExtraBodyError}</p>}
+
+          {httpDraftTestResult && (
+            <p
+              className={`text-xs ${
+                httpDraftTestResult.success ? 'text-emerald-600' : 'text-red-500'
+              }`}
+            >
+              {formatHttpConfigTestResult(httpDraftTestResult)}
+            </p>
+          )}
+
+          <div className="space-y-1.5">
+            {aiHttpConfigs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No HTTP model config yet.</p>
+            ) : (
+              aiHttpConfigs.map((item) => {
+                const itemTestResult = savedHttpConfigTestResults[item.id];
+                const itemTesting = testingSavedHttpConfigId === item.id;
+                return (
+                  <div key={item.id} className="space-y-1">
+                    <div className="flex items-center justify-between rounded-md border px-3 py-2 text-xs">
+                      <div className="min-w-0 flex-1 truncate">
+                        {item.name} · {item.model} · {item.mode} · {item.baseUrl}
+                      </div>
+                      <div className="ml-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleTestSavedHttpConfig(item)}
+                          disabled={itemTesting}
+                          className="text-muted-foreground underline hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {itemTesting ? 'Testing...' : 'Test'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveHttpConfig(item.id)}
+                          className="text-muted-foreground underline hover:text-foreground"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                    {itemTestResult && (
+                      <p
+                        className={`px-1 text-xs ${
+                          itemTestResult.success ? 'text-emerald-600' : 'text-red-500'
+                        }`}
+                      >
+                        {formatHttpConfigTestResult(itemTestResult)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Commit Message Generator Section */}
@@ -194,35 +569,70 @@ export function AISettings() {
             </div>
 
             {/* Model */}
-            <div className="grid grid-cols-[140px_1fr] items-center gap-4">
-              <span className="text-sm font-medium">{t('Model')}</span>
-              <div className="space-y-1.5">
-                <Select
-                  value={commitMessageGenerator.model}
-                  onValueChange={(v) => v && setCommitMessageGenerator({ model: v })}
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue>
-                      {MODELS_BY_PROVIDER[commitMessageGenerator.provider ?? 'claude-code']?.find(
-                        (m) => m.value === commitMessageGenerator.model
-                      )?.label ?? commitMessageGenerator.model}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {MODELS_BY_PROVIDER[commitMessageGenerator.provider ?? 'claude-code']?.map(
-                      (m) => (
-                        <SelectItem key={m.value} value={m.value}>
-                          {m.label}
+            {commitMessageGenerator.provider === 'openai-http' ? (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">HTTP Config</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={commitMessageGenerator.httpConfigId ?? ''}
+                    onValueChange={(v) => {
+                      const config = getHttpConfigById(v);
+                      setCommitMessageGenerator({
+                        httpConfigId: v || undefined,
+                        model: config?.model ?? commitMessageGenerator.model,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-64">
+                      <SelectValue>
+                        {getHttpConfigById(commitMessageGenerator.httpConfigId)?.name ??
+                          'Select config'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {aiHttpConfigs.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name} ({item.model}/{item.mode})
                         </SelectItem>
-                      )
-                    )}
-                  </SelectPopup>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {t('Model for generating commit messages')}
-                </p>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    key/model 在配置里维护，执行时从配置读取
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">{t('Model')}</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={commitMessageGenerator.model}
+                    onValueChange={(v) => v && setCommitMessageGenerator({ model: v })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue>
+                        {MODELS_BY_PROVIDER[commitMessageGenerator.provider ?? 'claude-code']?.find(
+                          (m) => m.value === commitMessageGenerator.model
+                        )?.label ?? commitMessageGenerator.model}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {MODELS_BY_PROVIDER[commitMessageGenerator.provider ?? 'claude-code']?.map(
+                        (m) => (
+                          <SelectItem key={m.value} value={m.value}>
+                            {m.label}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {t('Model for generating commit messages')}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Reasoning Level - Only for Codex CLI */}
             {commitMessageGenerator.provider === 'codex-cli' && (
@@ -399,31 +809,63 @@ export function AISettings() {
             </div>
 
             {/* Model */}
-            <div className="grid grid-cols-[140px_1fr] items-center gap-4">
-              <span className="text-sm font-medium">{t('Model')}</span>
-              <div className="space-y-1.5">
-                <Select
-                  value={codeReview.model}
-                  onValueChange={(v) => v && setCodeReview({ model: v })}
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue>
-                      {MODELS_BY_PROVIDER[codeReview.provider ?? 'claude-code']?.find(
-                        (m) => m.value === codeReview.model
-                      )?.label ?? codeReview.model}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {MODELS_BY_PROVIDER[codeReview.provider ?? 'claude-code']?.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-                <p className="text-xs text-muted-foreground">{t('Model for code review')}</p>
+            {codeReview.provider === 'openai-http' ? (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">HTTP Config</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={codeReview.httpConfigId ?? ''}
+                    onValueChange={(v) => {
+                      const config = getHttpConfigById(v);
+                      setCodeReview({
+                        httpConfigId: v || undefined,
+                        model: config?.model ?? codeReview.model,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-64">
+                      <SelectValue>
+                        {getHttpConfigById(codeReview.httpConfigId)?.name ?? 'Select config'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {aiHttpConfigs.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name} ({item.model}/{item.mode})
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Code Review 会走该 HTTP 配置</p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">{t('Model')}</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={codeReview.model}
+                    onValueChange={(v) => v && setCodeReview({ model: v })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue>
+                        {MODELS_BY_PROVIDER[codeReview.provider ?? 'claude-code']?.find(
+                          (m) => m.value === codeReview.model
+                        )?.label ?? codeReview.model}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {MODELS_BY_PROVIDER[codeReview.provider ?? 'claude-code']?.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">{t('Model for code review')}</p>
+                </div>
+              </div>
+            )}
 
             {/* Reasoning Level - Only for Codex CLI */}
             {codeReview.provider === 'codex-cli' && (
@@ -590,33 +1032,68 @@ export function AISettings() {
             </div>
 
             {/* Model */}
-            <div className="grid grid-cols-[140px_1fr] items-center gap-4">
-              <span className="text-sm font-medium">{t('Model')}</span>
-              <div className="space-y-1.5">
-                <Select
-                  value={branchNameGenerator.model}
-                  onValueChange={(v) => v && setBranchNameGenerator({ model: v })}
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue>
-                      {MODELS_BY_PROVIDER[branchNameGenerator.provider ?? 'claude-code']?.find(
-                        (m) => m.value === branchNameGenerator.model
-                      )?.label ?? branchNameGenerator.model}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {MODELS_BY_PROVIDER[branchNameGenerator.provider ?? 'claude-code']?.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {t('Model for generating branch names')}
-                </p>
+            {branchNameGenerator.provider === 'openai-http' ? (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">HTTP Config</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={branchNameGenerator.httpConfigId ?? ''}
+                    onValueChange={(v) => {
+                      const config = getHttpConfigById(v);
+                      setBranchNameGenerator({
+                        httpConfigId: v || undefined,
+                        model: config?.model ?? branchNameGenerator.model,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-64">
+                      <SelectValue>
+                        {getHttpConfigById(branchNameGenerator.httpConfigId)?.name ??
+                          'Select config'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {aiHttpConfigs.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name} ({item.model}/{item.mode})
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">分支名生成会走该 HTTP 配置</p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">{t('Model')}</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={branchNameGenerator.model}
+                    onValueChange={(v) => v && setBranchNameGenerator({ model: v })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue>
+                        {MODELS_BY_PROVIDER[branchNameGenerator.provider ?? 'claude-code']?.find(
+                          (m) => m.value === branchNameGenerator.model
+                        )?.label ?? branchNameGenerator.model}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {MODELS_BY_PROVIDER[branchNameGenerator.provider ?? 'claude-code']?.map(
+                        (m) => (
+                          <SelectItem key={m.value} value={m.value}>
+                            {m.label}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {t('Model for generating branch names')}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Reasoning Level - Only for Codex CLI */}
             {branchNameGenerator.provider === 'codex-cli' && (
@@ -743,33 +1220,65 @@ export function AISettings() {
             </div>
 
             {/* Model */}
-            <div className="grid grid-cols-[140px_1fr] items-center gap-4">
-              <span className="text-sm font-medium">{t('Model')}</span>
-              <div className="space-y-1.5">
-                <Select
-                  value={todoPolish.model}
-                  onValueChange={(v) => v && setTodoPolish({ model: v })}
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue>
-                      {MODELS_BY_PROVIDER[todoPolish.provider ?? 'claude-code']?.find(
-                        (m) => m.value === todoPolish.model
-                      )?.label ?? todoPolish.model}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {MODELS_BY_PROVIDER[todoPolish.provider ?? 'claude-code']?.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {t('Model for polishing task content')}
-                </p>
+            {todoPolish.provider === 'openai-http' ? (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">HTTP Config</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={todoPolish.httpConfigId ?? ''}
+                    onValueChange={(v) => {
+                      const config = getHttpConfigById(v);
+                      setTodoPolish({
+                        httpConfigId: v || undefined,
+                        model: config?.model ?? todoPolish.model,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-64">
+                      <SelectValue>
+                        {getHttpConfigById(todoPolish.httpConfigId)?.name ?? 'Select config'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {aiHttpConfigs.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name} ({item.model}/{item.mode})
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Todo 润色会走该 HTTP 配置</p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+                <span className="text-sm font-medium">{t('Model')}</span>
+                <div className="space-y-1.5">
+                  <Select
+                    value={todoPolish.model}
+                    onValueChange={(v) => v && setTodoPolish({ model: v })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue>
+                        {MODELS_BY_PROVIDER[todoPolish.provider ?? 'claude-code']?.find(
+                          (m) => m.value === todoPolish.model
+                        )?.label ?? todoPolish.model}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {MODELS_BY_PROVIDER[todoPolish.provider ?? 'claude-code']?.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {t('Model for polishing task content')}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Reasoning Level - Only for Codex CLI */}
             {todoPolish.provider === 'codex-cli' && (

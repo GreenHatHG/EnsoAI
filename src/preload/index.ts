@@ -29,6 +29,8 @@ import type {
   GitStatus,
   GitSubmodule,
   GitWorktree,
+  HttpAIConfigTestRequest,
+  HttpAIConfigTestResult,
   McpServer,
   McpServerConfig,
   MergeConflict,
@@ -161,6 +163,7 @@ const electronAPI = {
         timeout: number;
         provider: string;
         model: string;
+        httpConfigId?: string;
         reasoningEffort?: string;
         bare?: boolean;
         claudeEffort?: string;
@@ -174,6 +177,7 @@ const electronAPI = {
         prompt: string;
         provider: string;
         model: string;
+        httpConfigId?: string;
         reasoningEffort?: string;
         bare?: boolean;
         claudeEffort?: string;
@@ -185,6 +189,7 @@ const electronAPI = {
       options: {
         provider: string;
         model: string;
+        httpConfigId?: string;
         reasoningEffort?: string;
         bare?: boolean;
         claudeEffort?: string;
@@ -514,6 +519,8 @@ const electronAPI = {
       proxyUrl: string
     ): Promise<{ success: boolean; latency?: number; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.APP_TEST_PROXY, proxyUrl),
+    testHttpAIConfig: (request: HttpAIConfigTestRequest): Promise<HttpAIConfigTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APP_TEST_HTTP_AI_CONFIG, request),
   },
 
   // Dialog
@@ -704,6 +711,7 @@ const electronAPI = {
       timeout: number;
       provider: string;
       model: string;
+      httpConfigId?: string;
       reasoningEffort?: string;
       bare?: boolean;
       claudeEffort?: string;

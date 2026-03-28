@@ -1,7 +1,8 @@
 import { execSync } from 'node:child_process';
-import type { AIProvider, ModelId } from '@shared/types';
 import type { CommonAICLIOptions } from '@shared/types/ai';
 import { isWslGitRepository, spawnGit } from '../git/runtime';
+import { requestHttpAIText } from './http-client';
+import { resolveHttpAIConfig } from './http-config';
 import { parseCLIOutput, spawnCLI, stripCodeFence } from './providers';
 
 export interface CommitMessageOptions extends CommonAICLIOptions {
@@ -113,6 +114,27 @@ ${stagedStat || '(no stats)'}
 
 变更详情：
 ${truncatedDiff}`;
+
+  if (provider === 'openai-http') {
+    const resolvedConfig = resolveHttpAIConfig(options.httpConfigId);
+    if (!resolvedConfig.config) {
+      return { success: false, error: resolvedConfig.error ?? 'Missing HTTP model config' };
+    }
+
+    try {
+      const text = await requestHttpAIText({
+        config: resolvedConfig.config,
+        prompt,
+        timeoutMs: timeout * 1000,
+      });
+      return { success: true, message: stripCodeFence(text).trim() };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 
   return new Promise((resolve) => {
     const timeoutMs = timeout * 1000;

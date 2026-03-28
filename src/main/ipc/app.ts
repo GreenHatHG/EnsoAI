@@ -1,6 +1,7 @@
-import type { ProxySettings } from '@shared/types';
+import type { HttpAIConfigTestRequest, ProxySettings } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain } from 'electron';
+import { testHttpAIConfig } from '../services/ai/http-config-test';
 import { appDetector } from '../services/app/AppDetector';
 import { validateLocalPath } from '../services/app/PathValidator';
 import { getRecentProjects } from '../services/app/RecentProjectsService';
@@ -35,6 +36,10 @@ export function registerAppHandlers() {
   ipcMain.handle(IPC_CHANNELS.APP_SET_PROXY, (_, settings: ProxySettings) => applyProxy(settings));
 
   ipcMain.handle(IPC_CHANNELS.APP_TEST_PROXY, (_, proxyUrl: string) => testProxy(proxyUrl));
+
+  ipcMain.handle(IPC_CHANNELS.APP_TEST_HTTP_AI_CONFIG, (_, request: HttpAIConfigTestRequest) =>
+    testHttpAIConfig(request)
+  );
 
   ipcMain.handle(IPC_CHANNELS.APP_RECENT_PROJECTS, async () => {
     return await getRecentProjects();

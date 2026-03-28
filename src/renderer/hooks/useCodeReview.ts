@@ -30,6 +30,7 @@ export function useCodeReview({ repoPath }: UseCodeReviewOptions): UseCodeReview
     await startCodeReview(repoPath, {
       provider: codeReviewSettings.provider,
       model: codeReviewSettings.model,
+      httpConfigId: codeReviewSettings.httpConfigId,
       reasoningEffort: codeReviewSettings.reasoningEffort,
       bare: codeReviewSettings.bare,
       claudeEffort: codeReviewSettings.claudeEffort,
@@ -40,6 +41,7 @@ export function useCodeReview({ repoPath }: UseCodeReviewOptions): UseCodeReview
     repoPath,
     codeReviewSettings.provider,
     codeReviewSettings.model,
+    codeReviewSettings.httpConfigId,
     codeReviewSettings.reasoningEffort,
     codeReviewSettings.bare,
     codeReviewSettings.claudeEffort,
