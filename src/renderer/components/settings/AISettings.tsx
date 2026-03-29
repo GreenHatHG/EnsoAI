@@ -1,13 +1,4 @@
-import {
-  DEFAULT_HTTP_AI_BASE_URL,
-  DEFAULT_HTTP_AI_MODE,
-  type HttpAIConfig,
-  type HttpAIConfigTestRequest,
-  type HttpAIConfigTestResult,
-  type HttpAIRequestMode,
-} from '@shared/types';
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -31,6 +22,7 @@ import {
   useSettingsStore,
   validateCodeReviewPrompt,
 } from '@/stores/settings';
+import { HttpModelConfigsSection } from './HttpModelConfigsSection';
 
 // Provider options
 const PROVIDERS: { value: AIProvider; label: string }[] = [
@@ -66,25 +58,6 @@ const MODELS_BY_PROVIDER: Record<AIProvider, { value: string; label: string }[]>
   'openai-http': [],
 };
 
-const HTTP_MODE_OPTIONS: { value: HttpAIRequestMode; label: string }[] = [
-  { value: 'responses', label: 'responses' },
-  { value: 'chat_completions', label: 'chat_completions' },
-];
-
-const HTTP_CONFIG_TEST_UNKNOWN_ERROR = 'Unknown error';
-const HTTP_CONFIG_TEST_SUCCESS_TEXT = '可用';
-const HTTP_CONFIG_REQUIRED_KEY_ERROR = 'HTTP model config key is required';
-const HTTP_CONFIG_REQUIRED_MODEL_ERROR = 'HTTP model config model is required';
-const HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR = '自定义参数必须是 JSON 对象';
-const HTTP_CONFIG_EXTRA_BODY_HINT =
-  'JSON 对象，会合并到请求 body，可覆盖 model/input/messages/stream';
-const HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER = '{"reasoning_effort":"medium"}';
-const HTTP_CONFIG_EDIT_ACTION_TEXT = 'Edit';
-const HTTP_CONFIG_REMOVE_ACTION_TEXT = 'Remove';
-const HTTP_CONFIG_ADD_ACTION_TEXT = 'Add Config';
-const HTTP_CONFIG_SAVE_ACTION_TEXT = 'Save Config';
-const HTTP_CONFIG_CANCEL_EDIT_ACTION_TEXT = 'Cancel Edit';
-
 // Reasoning effort options for Codex CLI
 const REASONING_EFFORTS: { value: string; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -94,36 +67,6 @@ const REASONING_EFFORTS: { value: string; label: string }[] = [
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'xHigh' },
 ];
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function parseHttpExtraBody(value: string): {
-  extraBody?: Record<string, unknown>;
-  error?: string;
-} {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!isRecordObject(parsed)) {
-      return { error: HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR };
-    }
-    return { extraBody: parsed };
-  } catch {
-    return { error: HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR };
-  }
-}
-
-function stringifyHttpExtraBody(extraBody: Record<string, unknown> | undefined): string {
-  if (!extraBody || Object.keys(extraBody).length === 0) {
-    return '';
-  }
-  return JSON.stringify(extraBody, null, 2);
-}
 
 // Get default model for provider
 function getDefaultModel(provider: AIProvider): string {
@@ -150,23 +93,6 @@ export function AISettings() {
     todoPolish,
     setTodoPolish,
   } = useSettingsStore();
-
-  const [httpName, setHttpName] = useState('');
-  const [httpBaseUrl, setHttpBaseUrl] = useState(DEFAULT_HTTP_AI_BASE_URL);
-  const [httpKey, setHttpKey] = useState('');
-  const [httpModel, setHttpModel] = useState('');
-  const [httpExtraBody, setHttpExtraBody] = useState('');
-  const [httpExtraBodyError, setHttpExtraBodyError] = useState<string | null>(null);
-  const [httpMode, setHttpMode] = useState<HttpAIRequestMode>(DEFAULT_HTTP_AI_MODE);
-  const [httpDraftTestResult, setHttpDraftTestResult] = useState<HttpAIConfigTestResult | null>(
-    null
-  );
-  const [httpDraftTesting, setHttpDraftTesting] = useState(false);
-  const [editingHttpConfigId, setEditingHttpConfigId] = useState<string | null>(null);
-  const [testingSavedHttpConfigId, setTestingSavedHttpConfigId] = useState<string | null>(null);
-  const [savedHttpConfigTestResults, setSavedHttpConfigTestResults] = useState<
-    Record<string, HttpAIConfigTestResult | undefined>
-  >({});
 
   // Validation state for code review prompt
   const [promptValidation, setPromptValidation] = useState<{
@@ -218,201 +144,7 @@ export function AISettings() {
     });
   };
 
-  const clearHttpDraftTestResult = () => {
-    setHttpDraftTestResult(null);
-    setHttpExtraBodyError(null);
-  };
-
-  const clearSavedHttpConfigTestResult = (id: string) => {
-    setSavedHttpConfigTestResults((prev) => {
-      if (!prev[id]) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  };
-
-  const resetHttpDraftForm = () => {
-    setHttpName('');
-    setHttpBaseUrl(DEFAULT_HTTP_AI_BASE_URL);
-    setHttpKey('');
-    setHttpModel('');
-    setHttpExtraBody('');
-    setHttpMode(DEFAULT_HTTP_AI_MODE);
-    setEditingHttpConfigId(null);
-    clearHttpDraftTestResult();
-  };
-
-  const buildHttpConfigTestRequest = (config: {
-    name?: string;
-    baseUrl?: string;
-    apiKey?: string;
-    model?: string;
-    mode?: HttpAIRequestMode;
-    extraBody?: Record<string, unknown>;
-  }): HttpAIConfigTestRequest => ({
-    name: config.name,
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    model: config.model,
-    mode: config.mode,
-    extraBody: config.extraBody,
-  });
-
-  const formatHttpConfigTestResult = (result: HttpAIConfigTestResult): string => {
-    if (result.success) {
-      return result.latency !== undefined
-        ? `${HTTP_CONFIG_TEST_SUCCESS_TEXT} (${result.latency}ms)`
-        : HTTP_CONFIG_TEST_SUCCESS_TEXT;
-    }
-    return `失败: ${result.error ?? HTTP_CONFIG_TEST_UNKNOWN_ERROR}`;
-  };
-
-  const handleTestDraftHttpConfig = async () => {
-    if (!httpKey.trim()) {
-      setHttpDraftTestResult({
-        success: false,
-        error: HTTP_CONFIG_REQUIRED_KEY_ERROR,
-      });
-      return;
-    }
-    if (!httpModel.trim()) {
-      setHttpDraftTestResult({
-        success: false,
-        error: HTTP_CONFIG_REQUIRED_MODEL_ERROR,
-      });
-      return;
-    }
-    const parsedExtraBody = parseHttpExtraBody(httpExtraBody);
-    if (parsedExtraBody.error) {
-      setHttpExtraBodyError(parsedExtraBody.error);
-      return;
-    }
-    setHttpExtraBodyError(null);
-
-    setHttpDraftTesting(true);
-    try {
-      const result = await window.electronAPI.app.testHttpAIConfig(
-        buildHttpConfigTestRequest({
-          name: httpName,
-          baseUrl: httpBaseUrl,
-          apiKey: httpKey,
-          model: httpModel,
-          mode: httpMode,
-          extraBody: parsedExtraBody.extraBody,
-        })
-      );
-      setHttpDraftTestResult(result);
-    } catch (error) {
-      setHttpDraftTestResult({
-        success: false,
-        error: error instanceof Error ? error.message : HTTP_CONFIG_TEST_UNKNOWN_ERROR,
-      });
-    } finally {
-      setHttpDraftTesting(false);
-    }
-  };
-
-  const handleTestSavedHttpConfig = async (config: HttpAIConfig) => {
-    setTestingSavedHttpConfigId(config.id);
-    try {
-      const result = await window.electronAPI.app.testHttpAIConfig(
-        buildHttpConfigTestRequest({
-          name: config.name,
-          baseUrl: config.baseUrl,
-          apiKey: config.apiKey,
-          model: config.model,
-          mode: config.mode,
-          extraBody: config.extraBody,
-        })
-      );
-      setSavedHttpConfigTestResults((prev) => ({
-        ...prev,
-        [config.id]: result,
-      }));
-    } catch (error) {
-      setSavedHttpConfigTestResults((prev) => ({
-        ...prev,
-        [config.id]: {
-          success: false,
-          error: error instanceof Error ? error.message : HTTP_CONFIG_TEST_UNKNOWN_ERROR,
-        },
-      }));
-    } finally {
-      setTestingSavedHttpConfigId(null);
-    }
-  };
-
-  const handleRemoveHttpConfig = (id: string) => {
-    removeHttpAIConfig(id);
-    clearSavedHttpConfigTestResult(id);
-    if (testingSavedHttpConfigId === id) {
-      setTestingSavedHttpConfigId(null);
-    }
-    if (editingHttpConfigId === id) {
-      resetHttpDraftForm();
-    }
-  };
-
-  const handleEditHttpConfig = (config: HttpAIConfig) => {
-    setEditingHttpConfigId(config.id);
-    setHttpName(config.name);
-    setHttpBaseUrl(config.baseUrl);
-    setHttpKey(config.apiKey);
-    setHttpModel(config.model);
-    setHttpMode(config.mode || DEFAULT_HTTP_AI_MODE);
-    setHttpExtraBody(stringifyHttpExtraBody(config.extraBody));
-    clearHttpDraftTestResult();
-  };
-
-  const handleSaveHttpConfig = () => {
-    const trimmedKey = httpKey.trim();
-    const trimmedModel = httpModel.trim();
-    if (!trimmedKey || !trimmedModel) {
-      return;
-    }
-    const parsedExtraBody = parseHttpExtraBody(httpExtraBody);
-    if (parsedExtraBody.error) {
-      setHttpExtraBodyError(parsedExtraBody.error);
-      return;
-    }
-    setHttpExtraBodyError(null);
-
-    const editingConfig = editingHttpConfigId
-      ? aiHttpConfigs.find((item) => item.id === editingHttpConfigId)
-      : undefined;
-    if (editingHttpConfigId && !editingConfig) {
-      resetHttpDraftForm();
-      return;
-    }
-    const fallbackName = editingConfig?.name || `HTTP-${aiHttpConfigs.length + 1}`;
-    const payload: HttpAIConfig = {
-      id: editingConfig?.id || crypto.randomUUID(),
-      name: httpName.trim() || fallbackName,
-      baseUrl: (httpBaseUrl.trim() || DEFAULT_HTTP_AI_BASE_URL).replace(/\/+$/, ''),
-      apiKey: trimmedKey,
-      model: trimmedModel,
-      mode: httpMode || DEFAULT_HTTP_AI_MODE,
-      extraBody: parsedExtraBody.extraBody,
-      enabled: editingConfig?.enabled ?? true,
-    };
-
-    if (editingConfig) {
-      updateHttpAIConfig(editingConfig.id, payload);
-      clearSavedHttpConfigTestResult(editingConfig.id);
-      if (testingSavedHttpConfigId === editingConfig.id) {
-        setTestingSavedHttpConfigId(null);
-      }
-    } else {
-      addHttpAIConfig(payload);
-    }
-    resetHttpDraftForm();
-  };
-
-  const getHttpConfigById = (id?: string | null): HttpAIConfig | undefined =>
-    aiHttpConfigs.find((item) => item.id === id);
+  const getHttpConfigById = (id?: string | null) => aiHttpConfigs.find((item) => item.id === id);
 
   return (
     <div className="space-y-6">
@@ -423,168 +155,12 @@ export function AISettings() {
         </p>
       </div>
 
-      <div className="border-t pt-6">
-        <div>
-          <h4 className="text-base font-medium">HTTP Model Configs</h4>
-          <p className="text-sm text-muted-foreground">
-            key 和 model 必填，mode 默认 responses，base_url 默认官方地址
-          </p>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            <Input
-              value={httpName}
-              onChange={(e) => {
-                setHttpName(e.target.value);
-                clearHttpDraftTestResult();
-              }}
-              placeholder="Config name (optional)"
-            />
-            <Input
-              value={httpBaseUrl}
-              onChange={(e) => {
-                setHttpBaseUrl(e.target.value);
-                clearHttpDraftTestResult();
-              }}
-              placeholder={DEFAULT_HTTP_AI_BASE_URL}
-            />
-            <Input
-              type="password"
-              value={httpKey}
-              onChange={(e) => {
-                setHttpKey(e.target.value);
-                clearHttpDraftTestResult();
-              }}
-              placeholder="API key (required)"
-            />
-            <Input
-              value={httpModel}
-              onChange={(e) => {
-                setHttpModel(e.target.value);
-                clearHttpDraftTestResult();
-              }}
-              placeholder="Model (required)"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <textarea
-              value={httpExtraBody}
-              onChange={(e) => {
-                setHttpExtraBody(e.target.value);
-                clearHttpDraftTestResult();
-              }}
-              className="h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              placeholder={HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER}
-            />
-            <p className="text-xs text-muted-foreground">{HTTP_CONFIG_EXTRA_BODY_HINT}</p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Select
-              value={httpMode}
-              onValueChange={(v) => {
-                setHttpMode(v as HttpAIRequestMode);
-                clearHttpDraftTestResult();
-              }}
-            >
-              <SelectTrigger className="w-52">
-                <SelectValue>{httpMode}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {HTTP_MODE_OPTIONS.map((mode) => (
-                  <SelectItem key={mode.value} value={mode.value}>
-                    {mode.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleTestDraftHttpConfig()}
-              disabled={!httpKey || !httpModel || httpDraftTesting}
-            >
-              {httpDraftTesting ? 'Testing...' : 'Test Config'}
-            </Button>
-            <Button type="button" onClick={handleSaveHttpConfig} disabled={!httpKey || !httpModel}>
-              {editingHttpConfigId ? HTTP_CONFIG_SAVE_ACTION_TEXT : HTTP_CONFIG_ADD_ACTION_TEXT}
-            </Button>
-            {editingHttpConfigId && (
-              <Button type="button" variant="ghost" onClick={resetHttpDraftForm}>
-                {HTTP_CONFIG_CANCEL_EDIT_ACTION_TEXT}
-              </Button>
-            )}
-          </div>
-
-          {httpExtraBodyError && <p className="text-xs text-red-500">失败: {httpExtraBodyError}</p>}
-
-          {httpDraftTestResult && (
-            <p
-              className={`text-xs ${
-                httpDraftTestResult.success ? 'text-emerald-600' : 'text-red-500'
-              }`}
-            >
-              {formatHttpConfigTestResult(httpDraftTestResult)}
-            </p>
-          )}
-
-          <div className="space-y-1.5">
-            {aiHttpConfigs.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No HTTP model config yet.</p>
-            ) : (
-              aiHttpConfigs.map((item) => {
-                const itemTestResult = savedHttpConfigTestResults[item.id];
-                const itemTesting = testingSavedHttpConfigId === item.id;
-                return (
-                  <div key={item.id} className="space-y-1">
-                    <div className="flex items-center justify-between rounded-md border px-3 py-2 text-xs">
-                      <div className="min-w-0 flex-1 truncate">
-                        {item.name} · {item.model} · {item.mode} · {item.baseUrl}
-                      </div>
-                      <div className="ml-2 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleEditHttpConfig(item)}
-                          disabled={itemTesting}
-                          className="text-muted-foreground underline hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {HTTP_CONFIG_EDIT_ACTION_TEXT}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleTestSavedHttpConfig(item)}
-                          disabled={itemTesting}
-                          className="text-muted-foreground underline hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {itemTesting ? 'Testing...' : 'Test'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveHttpConfig(item.id)}
-                          className="text-muted-foreground underline hover:text-foreground"
-                        >
-                          {HTTP_CONFIG_REMOVE_ACTION_TEXT}
-                        </button>
-                      </div>
-                    </div>
-                    {itemTestResult && (
-                      <p
-                        className={`px-1 text-xs ${
-                          itemTestResult.success ? 'text-emerald-600' : 'text-red-500'
-                        }`}
-                      >
-                        {formatHttpConfigTestResult(itemTestResult)}
-                      </p>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </div>
+      <HttpModelConfigsSection
+        aiHttpConfigs={aiHttpConfigs}
+        addHttpAIConfig={addHttpAIConfig}
+        updateHttpAIConfig={updateHttpAIConfig}
+        removeHttpAIConfig={removeHttpAIConfig}
+      />
 
       {/* Commit Message Generator Section */}
       <div className="border-t pt-6">
