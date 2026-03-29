@@ -40,9 +40,11 @@ const HTTP_CONFIG_TEST_SUCCESS_TEXT = '接口可用';
 const HTTP_CONFIG_REQUIRED_KEY_ERROR = '请先填写 API Key';
 const HTTP_CONFIG_REQUIRED_MODEL_ERROR = '请先填写 Model';
 const HTTP_CONFIG_EXTRA_BODY_INVALID_ERROR = '自定义参数必须是 JSON 对象';
-const HTTP_CONFIG_EXTRA_BODY_HINT =
-  'JSON 对象，会合并到请求 body，可覆盖 model/input/messages/stream';
-const HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER = '{"reasoning_effort":"medium"}';
+const HTTP_CONFIG_EXTRA_BODY_HINT = '默认是空的。点“填默认”会放一个例子。';
+const HTTP_CONFIG_EXTRA_BODY_PLACEHOLDER = '';
+const HTTP_CONFIG_EXTRA_BODY_TEMPLATE_RESPONSES = '{"reasoning":{"effort":"medium"}}';
+const HTTP_CONFIG_EXTRA_BODY_TEMPLATE_CHAT_COMPLETIONS = '{"reasoning_effort":"medium"}';
+const HTTP_CONFIG_EXTRA_BODY_FILL_TEMPLATE_TEXT = '填默认';
 const HTTP_CONFIG_EDIT_ACTION_TEXT = 'Edit';
 const HTTP_CONFIG_REMOVE_ACTION_TEXT = 'Remove';
 const HTTP_CONFIG_ADD_ACTION_TEXT = 'Add Config';
@@ -129,9 +131,10 @@ export function HttpModelConfigsSection({
   const [httpBaseUrl, setHttpBaseUrl] = useState(DEFAULT_HTTP_AI_BASE_URL);
   const [httpKey, setHttpKey] = useState('');
   const [httpModel, setHttpModel] = useState('');
-  const [httpExtraBody, setHttpExtraBody] = useState('');
-  const [httpExtraBodyError, setHttpExtraBodyError] = useState<string | null>(null);
   const [httpMode, setHttpMode] = useState<HttpAIRequestMode>(DEFAULT_HTTP_AI_MODE);
+  const [httpExtraBody, setHttpExtraBody] = useState('');
+  const [httpExtraBodyAutoFilled, setHttpExtraBodyAutoFilled] = useState(false);
+  const [httpExtraBodyError, setHttpExtraBodyError] = useState<string | null>(null);
   const [httpDraftTestResult, setHttpDraftTestResult] = useState<HttpAIConfigTestResult | null>(
     null
   );
@@ -163,8 +166,9 @@ export function HttpModelConfigsSection({
     setHttpBaseUrl(DEFAULT_HTTP_AI_BASE_URL);
     setHttpKey('');
     setHttpModel('');
-    setHttpExtraBody('');
     setHttpMode(DEFAULT_HTTP_AI_MODE);
+    setHttpExtraBody('');
+    setHttpExtraBodyAutoFilled(false);
     setEditingHttpConfigId(null);
     clearHttpDraftTestResult();
   };
@@ -279,6 +283,7 @@ export function HttpModelConfigsSection({
     setHttpModel(config.model);
     setHttpMode(config.mode || DEFAULT_HTTP_AI_MODE);
     setHttpExtraBody(stringifyHttpExtraBody(config.extraBody));
+    setHttpExtraBodyAutoFilled(false);
     clearHttpDraftTestResult();
   };
 
@@ -331,6 +336,24 @@ export function HttpModelConfigsSection({
   const showDraftStatusArea = Boolean(
     httpExtraBodyError || httpDraftTesting || httpDraftTestResult
   );
+
+  const getExtraBodyTemplate = (mode: HttpAIRequestMode) =>
+    mode === 'chat_completions'
+      ? HTTP_CONFIG_EXTRA_BODY_TEMPLATE_CHAT_COMPLETIONS
+      : HTTP_CONFIG_EXTRA_BODY_TEMPLATE_RESPONSES;
+
+  const fillExtraBodyTemplate = (mode: HttpAIRequestMode) => {
+    setHttpExtraBody(getExtraBodyTemplate(mode));
+    setHttpExtraBodyAutoFilled(true);
+    clearHttpDraftTestResult();
+  };
+
+  const fillExtraBodyTemplateIfNeeded = (mode: HttpAIRequestMode) => {
+    if (httpExtraBody.trim() && !httpExtraBodyAutoFilled) {
+      return;
+    }
+    fillExtraBodyTemplate(mode);
+  };
 
   return (
     <Card>
@@ -402,11 +425,22 @@ export function HttpModelConfigsSection({
           </Field>
 
           <Field className="min-w-0 lg:col-span-2">
-            <FieldLabel>{HTTP_CONFIG_EXTRA_BODY_LABEL}</FieldLabel>
+            <div className="flex items-center justify-between gap-2">
+              <FieldLabel>{HTTP_CONFIG_EXTRA_BODY_LABEL}</FieldLabel>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={() => fillExtraBodyTemplateIfNeeded(httpMode)}
+              >
+                {HTTP_CONFIG_EXTRA_BODY_FILL_TEMPLATE_TEXT}
+              </Button>
+            </div>
             <Textarea
               value={httpExtraBody}
               onChange={(event) => {
                 setHttpExtraBody(event.target.value);
+                setHttpExtraBodyAutoFilled(false);
                 clearHttpDraftTestResult();
               }}
               aria-invalid={Boolean(httpExtraBodyError)}
@@ -421,8 +455,9 @@ export function HttpModelConfigsSection({
             <Select
               value={httpMode}
               onValueChange={(value) => {
-                setHttpMode(value as HttpAIRequestMode);
-                clearHttpDraftTestResult();
+                const nextMode = value as HttpAIRequestMode;
+                setHttpMode(nextMode);
+                fillExtraBodyTemplateIfNeeded(nextMode);
               }}
             >
               <SelectTrigger>

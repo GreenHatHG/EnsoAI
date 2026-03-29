@@ -97,8 +97,22 @@ describe('buildHttpRequestBody', () => {
       model: 'gpt-5.2',
       input: 'hello',
       stream: false,
-      reasoning_effort: 'medium',
+      reasoning: { effort: 'medium' },
       temperature: 0.2,
+    });
+  });
+
+  it('merges responses payload with reasoning_effort into existing reasoning', () => {
+    const body = buildHttpRequestBody('responses', 'hello', 'gpt-5.2', false, {
+      reasoning: { summary: 'auto' },
+      reasoning_effort: 'high',
+    });
+
+    expect(body).toEqual({
+      model: 'gpt-5.2',
+      input: 'hello',
+      stream: false,
+      reasoning: { summary: 'auto', effort: 'high' },
     });
   });
 
@@ -127,7 +141,7 @@ describe('buildHttpRequestBody', () => {
       model: 'gpt-5.2-codex',
       input: 'custom-input',
       stream: true,
-      reasoning_effort: 'high',
+      reasoning: { effort: 'high' },
     });
   });
 });

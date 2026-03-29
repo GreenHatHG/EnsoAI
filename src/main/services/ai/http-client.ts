@@ -20,6 +20,39 @@ export interface HttpStreamRequestOptions extends HttpTextRequestOptions {
   onChunk: (chunk: string) => void;
 }
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeExtraBodyForMode(
+  mode: HttpAIRequestMode,
+  extraBody?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!extraBody) {
+    return undefined;
+  }
+
+  if (mode !== 'responses') {
+    return extraBody;
+  }
+
+  if (!Object.hasOwn(extraBody, 'reasoning_effort')) {
+    return extraBody;
+  }
+
+  const { reasoning_effort, ...rest } = extraBody;
+
+  const existingReasoning = rest.reasoning;
+  const reasoning = isRecordObject(existingReasoning)
+    ? { ...existingReasoning, effort: reasoning_effort }
+    : { effort: reasoning_effort };
+
+  return {
+    ...rest,
+    reasoning,
+  };
+}
+
 function extractResponseOutputText(payload: HttpPayload): string {
   const outputText = payload.output_text;
   if (typeof outputText === 'string' && outputText.trim()) {
@@ -173,12 +206,14 @@ export function buildHttpRequestBody(
           input: prompt,
           stream,
         };
-  if (!extraBody) {
+
+  const normalizedExtraBody = normalizeExtraBodyForMode(mode, extraBody);
+  if (!normalizedExtraBody) {
     return baseBody;
   }
   return {
     ...baseBody,
-    ...extraBody,
+    ...normalizedExtraBody,
   };
 }
 
